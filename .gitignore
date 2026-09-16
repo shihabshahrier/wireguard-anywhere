@@ -1,0 +1,6 @@
+# Local VPN state — CONTAINS PRIVATE KEYS. Never commit.
+.vpn/
+*.conf
+*.pem
+*.png
+!docs/**/*.png

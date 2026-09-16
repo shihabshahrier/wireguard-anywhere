@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  shellcheck:
+    name: Lint shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Syntax check
+        run: bash -n vpn.sh && for f in lib/*.sh; do bash -n "$f"; done
+      - name: Lint
+        run: shellcheck -S warning -x vpn.sh lib/*.sh
+
+  bootstrap:
+    name: Validate server bootstrap script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq wireguard-tools shellcheck dash
+      - name: Render the bootstrap script and check it
+        run: |
+          set -euo pipefail
+          export VPN_STATE_DIR="$PWD/.vpn-ci"
+          ./vpn.sh client add ci-laptop
+          ./vpn.sh client add ci-phone
+          # Seed a server entry so the template renders without touching a cloud.
+          ROOT_DIR="$PWD"; . lib/common.sh
+          priv="$(wg_genkey)"
+          state_set '.servers["aws/us-west-2"] = {provider:"aws",region:"us-west-2",
+                       priv:$p,pub:$u,port:51820,dns:"1.1.1.2",psk:{},endpoint:"203.0.113.1"}' \
+            --arg p "$priv" --arg u "$(wg_pubkey "$priv")"
+          build_user_data aws us-west-2 cloudflare > /tmp/bootstrap.rendered.sh
+
+          # It must be a shell script, not YAML: Lightsail runs user-data as a
+          # script, so a #cloud-config payload would be executed line by line.
+          test "$(head -1 /tmp/bootstrap.rendered.sh)" = '#!/bin/sh'
+
+          # And it must be POSIX sh, not bash. Lightsail concatenates its own
+          # bootstrap with ours, so this file's shebang may not be the one that
+          # runs -- a bash-ism aborts the whole script and the instance comes up
+          # with nothing installed. Parsing under dash is the regression guard.
+          dash -n /tmp/bootstrap.rendered.sh
+          bash -n /tmp/bootstrap.rendered.sh
+          shellcheck -s sh -S error /tmp/bootstrap.rendered.sh
+
+          # Every placeholder must be substituted (the only match left is in a comment).
+          ! grep -v '^#' /tmp/bootstrap.rendered.sh | grep -q '__[A-Z_]*__'
+
+          # Both clients must appear as peers.
+          test "$(grep -c '^\[Peer\]' /tmp/bootstrap.rendered.sh)" -eq 2
+          grep -q 'ci-laptop' /tmp/bootstrap.rendered.sh
+          grep -q 'ci-phone'  /tmp/bootstrap.rendered.sh
+
+          # Lightsail caps user-data at 16 KB.
+          size=$(wc -c < /tmp/bootstrap.rendered.sh); echo "user-data: ${size} bytes"
+          test "$size" -lt 16384
+
+  keygen:
+    name: Verify X25519 key derivation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install wireguard-tools
+        run: sudo apt-get update && sudo apt-get install -y wireguard-tools jq
+      - name: OpenSSL-derived keys must match wireguard-tools
+        run: |
+          set -euo pipefail
+          ROOT_DIR="$PWD"; . lib/common.sh
+          # Independent check: RFC 7748 section 6.1 test vector.
+          priv_b64=$(echo 77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a | xxd -r -p | base64 -w0)
+          want=$(echo 8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a | xxd -r -p | base64 -w0)
+          got=$(wg_pubkey "$priv_b64")
+          echo "RFC 7748: want=$want got=$got"; test "$got" = "$want"
+          # And agree with the reference implementation on fresh keys.
+          for _ in 1 2 3; do
+            p="$(wg_genkey)"
+            test "$(wg_pubkey "$p")" = "$(printf '%s' "$p" | wg pubkey)"
+          done
+          echo "openssl and wireguard-tools agree"
