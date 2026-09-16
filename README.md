@@ -1,15 +1,15 @@
-# Create Your Own VPN Server
+# WireGuard Anywhere — Create Your Own VPN Server
 
 **Run your own WireGuard VPN on AWS, Google Cloud, or Azure with one command — free for your first 6–12 months on cloud free-tier credits, then about $0.42/month.**
 
-[![CI](https://github.com/shihabshahrier/Create-Your-Own-Vpn-Server/actions/workflows/ci.yml/badge.svg)](https://github.com/shihabshahrier/Create-Your-Own-Vpn-Server/actions/workflows/ci.yml)
+[![CI](https://github.com/shihabshahrier/wireguard-anywhere/actions/workflows/ci.yml/badge.svg)](https://github.com/shihabshahrier/wireguard-anywhere/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Shell: POSIX + bash 3.2](https://img.shields.io/badge/shell-POSIX%20%2B%20bash%203.2-lightgrey.svg)](AGENTS.md)
 
 ```bash
-git clone https://github.com/shihabshahrier/Create-Your-Own-Vpn-Server.git
-cd Create-Your-Own-Vpn-Server
+git clone https://github.com/shihabshahrier/wireguard-anywhere.git
+cd wireguard-anywhere
 ./vpn.sh up aws us-west-2 --clients laptop,phone
 ```
 
@@ -452,7 +452,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for conventions. The short version:
 
 If this saved you an afternoon, **please star the repo** — it is the main way
 people find it, and it tells me what to build next. If it did not work for you,
-[open an issue](https://github.com/shihabshahrier/Create-Your-Own-Vpn-Server/issues)
+[open an issue](https://github.com/shihabshahrier/wireguard-anywhere/issues)
 and say what broke; that is at least as useful.
 
 ---

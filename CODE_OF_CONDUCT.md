@@ -20,7 +20,7 @@ Be decent. Assume good faith. Criticize code, not people.
 ## Enforcement
 
 Report problems by opening a private
-[security advisory](https://github.com/shihabshahrier/Create-Your-Own-Vpn-Server/security/advisories/new)
+[security advisory](https://github.com/shihabshahrier/wireguard-anywhere/security/advisories/new)
 or contacting the maintainer directly. Reports are handled confidentially.
 
 Maintainers may remove comments, commits, issues, or contributors that violate

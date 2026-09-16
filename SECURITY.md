@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Open a [GitHub security advisory](https://github.com/shihabshahrier/Create-Your-Own-Vpn-Server/security/advisories/new)
+Open a [GitHub security advisory](https://github.com/shihabshahrier/wireguard-anywhere/security/advisories/new)
 rather than a public issue. Include the command you ran, what you expected, and what happened.
 
 ## What this tool does
