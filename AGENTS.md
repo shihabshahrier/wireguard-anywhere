@@ -115,6 +115,11 @@ Always tell the user how to stop paying:
 - **It must stay POSIX `sh`.** Lightsail concatenates its own bootstrap with
   yours, so the file's shebang may not be the one that runs. A bash-ism such as
   `set -o pipefail` aborts the whole script at line one.
+- **A 512 MB instance needs swap.** Without it the nightly unattended upgrade
+  runs the machine out of memory, systemd-networkd marks the uplink "failed",
+  and the DHCP lease expires an hour later: "running" in the console, dead on
+  the network. `bootstrap.sh` creates a swap file and installs
+  `/usr/local/sbin/net-watchdog` for this reason. Do not remove either.
 - **SSH is not exposed by default.** It is reachable over the tunnel at
   `10.66.66.1`. `./vpn.sh ssh` timing out is expected unless the VPN is connected
   or you passed `--ssh-public`.

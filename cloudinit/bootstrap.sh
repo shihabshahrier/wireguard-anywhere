@@ -21,6 +21,22 @@ echo "=== vpn bootstrap starting $(date -u +%FT%TZ) ==="
 
 export DEBIAN_FRONTEND=noninteractive
 
+# -------------------------------------------------------------------- swap --
+# The smallest instances have about 400 MB of usable RAM. The daily unattended
+# upgrade alone can exhaust that: the kernel then kills it, and while the
+# machine thrashes systemd-networkd times out on a netlink call, marks the
+# uplink "failed" and stops renewing its DHCP lease. An hour later the instance
+# is "running" but unreachable. A swap file is what prevents the thrash.
+if [ ! -f /swapfile ]; then
+  fallocate -l 1G /swapfile 2>/dev/null \
+    || dd if=/dev/zero of=/swapfile bs=1M count=1024 status=none
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+fi
+swapon /swapfile 2>/dev/null || true
+grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+echo 'vm.swappiness=20' > /etc/sysctl.d/98-swap.conf
+
 # ---------------------------------------------------------------- packages --
 # Retry: on a fresh instance the archive can briefly be unreachable, and other
 # boot-time agents may still hold the dpkg lock.
@@ -151,10 +167,97 @@ cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 EOF
+# Kernel and libc fixes only take effect after a reboot, and nobody logs in to
+# a VPN box to do it. WireGuard clients reconnect on their own a minute later.
+cat > /etc/apt/apt.conf.d/52vpn-auto-reboot <<'EOF'
+Unattended-Upgrade::Automatic-Reboot "true";
+EOF
 
 # ------------------------------------------------------------ bring it up --
 systemctl enable wg-quick@wg0
 systemctl start wg-quick@wg0 || true
+
+# -------------------------------------------------------- uplink watchdog --
+# Second line of defence behind the swap file. SSH is reachable only through
+# the tunnel, so a server that loses its uplink cannot be repaired from outside:
+# it has to notice and recover by itself.
+cat > /usr/local/sbin/net-watchdog <<'EOF'
+#!/bin/sh
+# Run every two minutes by net-watchdog.timer. The ladder is slow to reach a
+# reboot, and reboots at most once in six hours, so an outage on the provider's
+# side cannot turn into a reboot loop.
+set -u
+FAILS=/run/net-watchdog.fails
+STAMP=/var/lib/net-watchdog.last-reboot
+
+WAN="$(ip -4 route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
+[ -n "$WAN" ] || WAN="$(ip -6 route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
+[ -n "$WAN" ] || WAN="$(ls /sys/class/net | grep -v -E '^(lo|wg)' | head -n 1)"
+
+alive() {
+  ping -c 1 -W 3 -q 1.1.1.1 >/dev/null 2>&1 && return 0
+  ping -c 1 -W 3 -q 8.8.8.8 >/dev/null 2>&1 && return 0
+  ping -6 -c 1 -W 3 -q 2606:4700:4700::1111 >/dev/null 2>&1 && return 0
+  # Any HTTP answer from the metadata service proves the link works.
+  curl -s -m 4 -o /dev/null http://169.254.169.254/ 2>/dev/null && return 0
+  return 1
+}
+
+# True when the link still works but systemd-networkd has stopped managing it,
+# which is the hour before the DHCP lease runs out.
+gave_up() {
+  [ -n "$WAN" ] || return 1
+  networkctl --no-legend --no-pager list "$WAN" 2>/dev/null | awk '{print $5}' | grep -q '^failed$'
+}
+
+if alive; then
+  rm -f "$FAILS"
+  if gave_up; then
+    logger -t net-watchdog "$WAN works but systemd-networkd gave up on it; reconfiguring"
+    networkctl reconfigure "$WAN" 2>/dev/null || systemctl restart systemd-networkd
+  fi
+  exit 0
+fi
+
+n=$(( $(cat "$FAILS" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$FAILS"
+logger -t net-watchdog "uplink unreachable (check $n)"
+
+case "$n" in
+  1) networkctl reconfigure "$WAN" 2>/dev/null || systemctl restart systemd-networkd ;;
+  2|3) systemctl restart systemd-networkd ;;
+  *)
+    now="$(date +%s)"
+    last="$(cat "$STAMP" 2>/dev/null || echo 0)"
+    if [ $(( now - last )) -gt 21600 ]; then
+      echo "$now" > "$STAMP"
+      logger -t net-watchdog "uplink still down after $n checks; rebooting"
+      systemctl reboot
+    fi
+    ;;
+esac
+EOF
+chmod 755 /usr/local/sbin/net-watchdog
+
+cat > /etc/systemd/system/net-watchdog.service <<'EOF'
+[Unit]
+Description=Restore the uplink if it has gone away
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/net-watchdog
+EOF
+cat > /etc/systemd/system/net-watchdog.timer <<'EOF'
+[Unit]
+Description=Check the uplink every two minutes
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now net-watchdog.timer || true
 
 # ------------------------------------------------------- resolver setup --
 case "__DNS_MODE__" in

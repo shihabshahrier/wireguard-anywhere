@@ -302,7 +302,10 @@ Pass `--dns` at launch. Defaults to `cloudflare`.
 - Both `0.0.0.0/0` and `::/0` route into the tunnel, so native IPv6 cannot leak
   around it. If the server has no global IPv6, forwarded IPv6 is *rejected* rather
   than blackholed, so clients fail over to IPv4 immediately instead of stalling.
-- Unattended security upgrades enabled on the server.
+- Unattended security upgrades enabled on the server, with an automatic reboot
+  when an upgrade needs one.
+- A swap file and an uplink watchdog, so a 512 MB instance survives its own
+  upgrades and recovers by itself if it ever drops off the network.
 - `.vpn/` is mode `700`, key files `600`, and gitignored.
 
 **Your responsibility:**
@@ -333,6 +336,15 @@ The bootstrap script failed. Launch with `--ssh-public` and read its log:
 ```bash
 ./vpn.sh up aws us-west-2 --ssh-public --ssh-cidr "$(./vpn.sh pool)"
 ./vpn.sh logs aws us-west-2
+```
+
+**It worked for weeks, then stopped. The instance still shows as running.**
+Servers launched before the swap file and watchdog were added can run out of
+memory during a nightly upgrade and lose their network address. Reboot it from
+the provider (the address does not change), or simply recreate it:
+```bash
+aws lightsail reboot-instance --region us-west-2 --instance-name vpn-us-west-2
+./vpn.sh down aws us-west-2 && ./vpn.sh up aws us-west-2   # new endpoint, re-import configs
 ```
 
 **Handshake never completes.**
